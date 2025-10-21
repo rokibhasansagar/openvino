@@ -1,0 +1,76 @@
+name: Build (Windows)
+
+on: [push, workflow_dispatch]
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v5
+      with:
+        submodules: recursive
+        # master
+        # ref: 5833781ddbc476d77cf5593f1f8b34758988b9a8
+        fetch-depth: 0
+
+    - name: Setup MSVC
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Setup Ninja
+      run: pip install ninja
+
+    - name: Remove apiValidator
+      run: |
+        cd /d "C:\Program Files (x86)\Windows Kits\10\bin"
+        del /f /s /q apiValidator.exe
+
+    - name: Configure
+      run: cmake -S . -B build -G Ninja -D CMAKE_BUILD_TYPE=Release -D BUILD_SHARED_LIBS=ON -Wno-dev -LA
+        -D CMAKE_TOOLCHAIN_FILE=%cd%\cmake\toolchains\mt.runtime.win32.toolchain.cmake
+        -D ENABLE_LTO=ON -DENABLE_FASTER_BUILD=ON
+        -D ENABLE_PYTHON=OFF -D ENABLE_WHEEL=OFF
+        -D ENABLE_JS=OFF
+        -D ENABLE_SAMPLES=OFF -D ENABLE_DOCS=OFF -DENABLE_TESTS=OFF
+        -D ENABLE_NCC_STYLE=OFF -D ENABLE_CLANG_FORMAT=OFF -D ENABLE_CPPLINT=OFF
+        -D ENABLE_INTEL_CPU=ON -D THREADING=TBB
+        -D ENABLE_INTEL_GPU=ON -D ENABLE_ONEDNN_FOR_GPU=ON
+        -D ENABLE_INTEL_NPU=ON
+        -D ENABLE_MULTI=ON -D ENABLE_AUTO=ON -D ENABLE_AUTO_BATCH=ON -D ENABLE_HETERO=ON -D ENABLE_TEMPLATE=OFF -D ENABLE_PROXY=OFF
+        -D ENABLE_OV_ONNX_FRONTEND=ON -D ENABLE_OV_TF_FRONTEND=OFF -D ENABLE_OV_PADDLE_FRONTEND=OFF -D ENABLE_OV_IR_FRONTEND=OFF -D ENABLE_OV_PYTORCH_FRONTEND=OFF -D ENABLE_OV_TF_LITE_FRONTEND=OFF
+
+    - name: Build
+      run: cmake --build build --verbose
+
+    - name: Install
+      run: |
+        cmake --install build --prefix openvino
+        mkdir openvino\include
+        xcopy thirdparty\onnx\onnx\onnx openvino\include\onnx /s /i /f
+        xcopy build\thirdparty\onnx\onnx\onnx openvino\include\onnx /s /i /f
+        xcopy thirdparty\protobuf\protobuf\src\* openvino\include /s /f
+
+    - name: Show
+      run: ls -R openvino
+
+    - name: Package
+      shell: pwsh
+      run: Compress-Archive openvino -DestinationPath openvino-gpu-win64.zip
+
+    - name: Get description
+      shell: bash
+      run: echo OV_VERSION=`git describe --tags --long` >> $GITHUB_ENV
+
+    - name: Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: openvino-gpu-win64.zip
+        name: Build ${{ env.OV_VERSION }}
+        tag_name: ${{ env.OV_VERSION }}
+        prerelease: true
+
